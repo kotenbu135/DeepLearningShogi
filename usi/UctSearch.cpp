@@ -45,6 +45,7 @@
 #endif
 
 #include "cppshogi.h"
+#include "fuseki.hpp"
 
 using namespace std;
 
@@ -1717,6 +1718,20 @@ void SetModelPath(const std::string path[max_gpu])
 		else
 			model_path[i] = path[i];
 	}
+}
+
+void ForwardFusekiPolicy(const FusekiPosition& fusekiPos, DType* y1, DType* y2)
+{
+	// 通常フェーズのUCT探索（goUct）が一度も走っていない場合、NNモデルはまだロードされていない
+	// （selfplay/self_play.cppと異なり、この探索スレッド側の初期化はUctSearchGenmove経由で
+	// 遅延実行されるため）。InitGPU()はnn==nullptrの間だけ実際にロードするので、
+	// ここで呼んでも既にロード済みなら何もしない。
+	search_groups[0].InitGPU();
+
+	Features1 x1{};
+	Features2 x2{};
+	make_input_features(fusekiPos, x1, x2);
+	search_groups[0].nn_forward(0, 1, &x1, &x2, y1, y2);
 }
 
 void UCTSearcher::EvalNode() {

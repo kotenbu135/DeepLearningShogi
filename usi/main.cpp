@@ -14,6 +14,9 @@
 
 #include <future>
 #include <random>
+#include <cfloat>
+#include <cmath>
+#include <vector>
 #ifdef MAKE_BOOK
 #include <sys/stat.h>
 #endif
@@ -547,8 +550,9 @@ void MySearcher::setPositionAndLimits(Position& pos, std::istringstream& ssCmd, 
 	SetLimits(&pos, limits);
 }
 
-// 布石フェーズ（position fuseki）の go コマンド処理。NN方策・学習済み重みが未対応のため、
-// 暫定的に合法手からランダムに1手選ぶ（docs/roadmap.md参照）。UCT探索・ponder・時間制御は使わない。
+// 布石フェーズ（position fuseki）の go コマンド処理。selfplay/self_play.cppの
+// PlayFusekiPhase()と同じ方式（NNの方策をsoftmaxサンプリング）で1手選ぶ。
+// UCT探索・ponder・時間制御は使わない（布石フェーズには王手・詰みの概念がないため不要）。
 void MySearcher::goFuseki(Position& pos) {
 	const auto legalMoves = fusekiPos.legalDrops();
 	if (legalMoves.empty()) {
@@ -558,8 +562,24 @@ void MySearcher::goFuseki(Position& pos) {
 		inFusekiPhase = false;
 		return;
 	}
+
+	DType y1[MAX_MOVE_LABEL_NUM * (size_t)SquareNum];
+	DType y2[1];
+	ForwardFusekiPolicy(fusekiPos, y1, y2);
+
+	const Color color = fusekiPos.turn();
+	std::vector<double> probs(legalMoves.size());
+	float maxLogit = -FLT_MAX;
+	for (size_t i = 0; i < legalMoves.size(); ++i) {
+		const int label = make_fuseki_move_label(legalMoves[i].first, legalMoves[i].second, color);
+		maxLogit = std::max(maxLogit, (float)y1[label]);
+	}
+	for (size_t i = 0; i < legalMoves.size(); ++i) {
+		const int label = make_fuseki_move_label(legalMoves[i].first, legalMoves[i].second, color);
+		probs[i] = std::exp((double)((float)y1[label] - maxLogit));
+	}
 	static std::mt19937_64 rng(std::random_device{}());
-	std::uniform_int_distribution<size_t> dist(0, legalMoves.size() - 1);
+	std::discrete_distribution<size_t> dist(probs.begin(), probs.end());
 	const auto [pt, sq] = legalMoves[dist(rng)];
 
 	fusekiPos.doDrop(pt, sq);

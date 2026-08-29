@@ -46,6 +46,7 @@ cdef extern from "python_module.h" nogil:
     bool __fuseki_verify_final_sfen(const string& sfen)
     void __fuseki_make_input_features(char* ndfeatures1, char* ndfeatures2)
     int __fuseki_move_label(int pieceType, int square, int color)
+    bool __fuseki_parse_usi_move(const string& moveStr, int* outPieceType, int* outSquare)
     void __make_input_features_from_sfen(const string& sfen, char* ndfeatures1, char* ndfeatures2)
 
 init()
@@ -173,6 +174,15 @@ def fuseki_make_input_features(np.ndarray ndfeatures1, np.ndarray ndfeatures2):
 
 def fuseki_move_label(int piece_type, int square, int color):
     return __fuseki_move_label(piece_type, square, color)
+
+# usi/main.cppがbestmoveとして返す"K*5i"形式の指し手文字列を(piece_type, square)に変換する。
+# 不正な形式（またはUSIの投了/入玉宣言など駒打ちでないトークン）の場合はNoneを返す。
+def fuseki_parse_usi_move(str move_str):
+    cdef int piece_type = 0
+    cdef int square = 0
+    if not __fuseki_parse_usi_move(move_str.encode('ascii'), &piece_type, &square):
+        return None
+    return piece_type, square
 
 def make_input_features_from_sfen(str sfen, np.ndarray ndfeatures1, np.ndarray ndfeatures2):
     __make_input_features_from_sfen(sfen.encode('ascii'), ndfeatures1.data, ndfeatures2.data)

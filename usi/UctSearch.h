@@ -8,6 +8,9 @@
 #include "generateMoves.hpp"
 #include "search.hpp"
 #include "Node.h"
+#include "dtype.h"
+
+class FusekiPosition;
 
 #ifdef MULTI_PONDER
 void ResetMultiPonder();
@@ -107,6 +110,11 @@ void SetRandomMove2(const int ply, const int probability, const int temperature,
 
 // モデルパスの設定
 void SetModelPath(const std::string path[max_gpu]);
+
+// 布石フェーズの1局面ぶんの方策・価値をNN(gpu_id=0)から同期・非バッチ（batch_size=1）で取得する。
+// isready後、通常フェーズのUCT探索が一度も走っていない（NN未ロード）場合はここで初回ロードを行う。
+// y1はMAX_MOVE_LABEL_NUM*SquareNum要素、y2は1要素の呼び出し側バッファ。
+void ForwardFusekiPolicy(const FusekiPosition& fusekiPos, DType* y1, DType* y2);
 
 // 新規ゲーム
 void NewGame();
