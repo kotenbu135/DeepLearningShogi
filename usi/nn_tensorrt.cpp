@@ -39,8 +39,6 @@ struct NNTensorRT::InferenceSlot {
 	DType* y2_dev = nullptr;
 	cudaStream_t stream = nullptr;
 	InferUniquePtr<nvinfer1::IExecutionContext> context;
-	int binding_offset = 0;
-	std::vector<void*> bindings;
 };
 
 NNTensorRT::NNTensorRT(const char* filename, const int gpu_id, const int max_batch_size, const int profile_count) :
@@ -78,8 +76,9 @@ void NNTensorRT::build(const std::string& onnx_filename)
 		throw std::runtime_error("createInferBuilder");
 	}
 
-	const auto explicitBatch = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
-	auto network = InferUniquePtr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(explicitBatch));
+	// TensorRT 10以降は暗黙バッチが廃止され、常に明示バッチ（旧kEXPLICIT_BATCH相当）で動作するため
+	// フラグ指定は不要になった。
+	auto network = InferUniquePtr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(0));
 	if (!network)
 	{
 		throw std::runtime_error("createNetworkV2");
@@ -103,39 +102,12 @@ void NNTensorRT::build(const std::string& onnx_filename)
 		throw std::runtime_error("parseFromFile");
 	}
 
-	builder->setMaxBatchSize(max_batch_size);
-	config->setMaxWorkspaceSize(64_MiB);
+	config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, 64_MiB);
 
-	std::unique_ptr<nvinfer1::IInt8Calibrator> calibrator;
-	if (builder->platformHasFastInt8())
-	{
-		// キャリブレーションキャッシュがある場合のみINT8を使用
-		std::string calibration_cache_filename = std::string(onnx_filename) + ".calibcache";
-		std::ifstream calibcache(calibration_cache_filename);
-		if (calibcache.is_open())
-		{
-			calibcache.close();
-
-			config->setFlag(nvinfer1::BuilderFlag::kINT8);
-			calibrator.reset(new Int8EntropyCalibrator2(onnx_filename.c_str(), 1));
-			config->setInt8Calibrator(calibrator.get());
-		}
-		else if (builder->platformHasFastFp16())
-		{
-			config->setFlag(nvinfer1::BuilderFlag::kFP16);
-		}
-	}
-	else if (builder->platformHasFastFp16())
-	{
-		config->setFlag(nvinfer1::BuilderFlag::kFP16);
-	}
-
-#ifdef FP16
-	network->getInput(0)->setType(nvinfer1::DataType::kHALF);
-	network->getInput(1)->setType(nvinfer1::DataType::kHALF);
-	network->getOutput(0)->setType(nvinfer1::DataType::kHALF);
-	network->getOutput(1)->setType(nvinfer1::DataType::kHALF);
-#endif
+	// TensorRT 11ではIInt8Calibrator系のレガシーキャリブレーションAPIが削除されており、
+	// INT8を使う場合は明示的な量子化（QDQノードを含むONNXモデル）が前提となる。
+	// FP16/INT8の指定もITensor::setType()ではなくONNXモデル自体の型で決まる仕様に変わったため、
+	// ここでは常にONNXモデルに記録された型（通常FP32）のままビルドする。
 
 	assert(network->getNbInputs() == 2);
 	nvinfer1::Dims inputDims[] = { network->getInput(0)->getDimensions(), network->getInput(1)->getDimensions() };
@@ -158,17 +130,12 @@ void NNTensorRT::build(const std::string& onnx_filename)
 		config->addOptimizationProfile(profile);
 	}
 
-	// TensorRT 8 より nvinfer1::IBuilder::buildSerializedNetwork() が追加され、 nvinfer1::IBuilder::buildEngineWithConfig() は非推奨となった。
-	// nvinfer1::IBuilder::buildEngineWithConfig() は TensorRT 10.0 にて削除される見込み。
-	// https://docs.nvidia.com/deeplearning/tensorrt/api/c_api/deprecated.html
-	// https://docs.nvidia.com/deeplearning/tensorrt/archives/tensorrt-800-ea/release-notes/tensorrt-8.html#rel_8-0-0-EA
-#if NV_TENSORRT_MAJOR >= 8
 	auto serializedEngine = InferUniquePtr<nvinfer1::IHostMemory>(builder->buildSerializedNetwork(*network, *config));
 	if (!serializedEngine)
 	{
 		throw std::runtime_error("buildSerializedNetwork");
 	}
-	auto runtime = InferUniquePtr<nvinfer1::IRuntime>(nvinfer1::createInferRuntime(gLogger));
+	runtime = InferUniquePtr<nvinfer1::IRuntime>(nvinfer1::createInferRuntime(gLogger));
 	engine.reset(runtime->deserializeCudaEngine(serializedEngine->data(), serializedEngine->size()));
 	if (!engine)
 	{
@@ -177,13 +144,6 @@ void NNTensorRT::build(const std::string& onnx_filename)
 	// 一旦シリアライズ化されたエンジンはデシリアライズを行った上で捨てているが、
 	// この後またすぐにファイル書き出し用にシリアライズを行っているので、手順改善の余地あり。
 	// // auto serializedEngine = InferUniquePtr<nvinfer1::IHostMemory>(engine->serialize());
-#else
-	engine.reset(builder->buildEngineWithConfig(*network, *config));
-	if (!engine)
-	{
-		throw std::runtime_error("buildEngineWithConfig");
-	}
-#endif
 }
 
 void NNTensorRT::load_model(const char* filename)
@@ -203,8 +163,12 @@ void NNTensorRT::load_model(const char* filename)
 		seriarizedFile.seekg(0, std::ios_base::beg);
 		std::unique_ptr<char[]> blob(new char[modelSize]);
 		seriarizedFile.read(blob.get(), modelSize);
-		auto runtime = InferUniquePtr<nvinfer1::IRuntime>(nvinfer1::createInferRuntime(gLogger));
+		runtime = InferUniquePtr<nvinfer1::IRuntime>(nvinfer1::createInferRuntime(gLogger));
 		engine = InferUniquePtr<nvinfer1::ICudaEngine>(runtime->deserializeCudaEngine(blob.get(), modelSize));
+		if (!engine)
+		{
+			throw std::runtime_error("deserializeCudaEngine");
+		}
 	}
 	else
 	{
@@ -230,8 +194,8 @@ void NNTensorRT::load_model(const char* filename)
 		}
 	}
 
-	inputDims1 = engine->getBindingDimensions(0);
-	inputDims2 = engine->getBindingDimensions(1);
+	inputDims1 = engine->getTensorShape("input1");
+	inputDims2 = engine->getTensorShape("input2");
 }
 
 int NNTensorRT::slot_capacity() const
@@ -247,9 +211,6 @@ std::unique_ptr<NNTensorRT::InferenceSlot> NNTensorRT::create_slot(const int pro
 	}
 
 	auto slot = std::unique_ptr<InferenceSlot>(new InferenceSlot());
-	const int bindings_per_profile = engine->getNbBindings() / engine->getNbOptimizationProfiles();
-	slot->binding_offset = bindings_per_profile * profile_index;
-	slot->bindings.resize(engine->getNbBindings(), nullptr);
 	checkCudaErrors(cudaMalloc((void**)&slot->p1_dev, sizeof(packed_features1_t) * max_batch_size));
 	checkCudaErrors(cudaMalloc((void**)&slot->p2_dev, sizeof(packed_features2_t) * max_batch_size));
 	checkCudaErrors(cudaMalloc((void**)&slot->x1_dev, sizeof(features1_t) * max_batch_size));
@@ -266,10 +227,15 @@ std::unique_ptr<NNTensorRT::InferenceSlot> NNTensorRT::create_slot(const int pro
 	{
 		throw std::runtime_error("setOptimizationProfileAsync");
 	}
-	slot->bindings[slot->binding_offset + 0] = slot->x1_dev;
-	slot->bindings[slot->binding_offset + 1] = slot->x2_dev;
-	slot->bindings[slot->binding_offset + 2] = slot->y1_dev;
-	slot->bindings[slot->binding_offset + 3] = slot->y2_dev;
+	// スロットのデバイスバッファはスロット生存期間中ずっと同じアドレスを使い回すため、
+	// テンソルアドレスの登録は生成時に一度だけ行えばよい（バッチサイズが変わっても再設定は不要）。
+	if (!slot->context->setTensorAddress("input1", slot->x1_dev) ||
+		!slot->context->setTensorAddress("input2", slot->x2_dev) ||
+		!slot->context->setTensorAddress("output_policy", slot->y1_dev) ||
+		!slot->context->setTensorAddress("output_value", slot->y2_dev))
+	{
+		throw std::runtime_error("setTensorAddress");
+	}
 	return slot;
 }
 
@@ -312,11 +278,16 @@ void NNTensorRT::forward_impl(InferenceSlot* slot, const int batch_size, packed_
 	auto dims2 = inputDims2;
 	dims1.d[0] = batch_size;
 	dims2.d[0] = batch_size;
-	slot->context->setBindingDimensions(slot->binding_offset + 0, dims1);
-	slot->context->setBindingDimensions(slot->binding_offset + 1, dims2);
+	if (!slot->context->setInputShape("input1", dims1) ||
+		!slot->context->setInputShape("input2", dims2))
+	{
+		throw std::runtime_error("setInputShape");
+	}
 
-	const bool status = slot->context->enqueueV2(slot->bindings.data(), slot->stream, nullptr);
-	assert(status);
+	if (!slot->context->enqueueV3(slot->stream))
+	{
+		throw std::runtime_error("enqueueV3");
+	}
 
 	checkCudaErrors(cudaMemcpyAsync(y1, slot->y1_dev, sizeof(DType) * MAX_MOVE_LABEL_NUM * (size_t)SquareNum * batch_size, cudaMemcpyDeviceToHost, slot->stream));
 	checkCudaErrors(cudaMemcpyAsync(y2, slot->y2_dev, sizeof(DType) * batch_size, cudaMemcpyDeviceToHost, slot->stream));

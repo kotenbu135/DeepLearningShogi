@@ -1,12 +1,12 @@
 ﻿#pragma once
 
 #include "cppshogi.h"
+#include "error_util.h"
 
 #include <cuda_runtime.h>
 #include "NvInferRuntimeCommon.h"
 #include "NvInfer.h"
 #include "NvOnnxParser.h"
-#include "int8_calibrator.h"
 
 #include <memory>
 #include <mutex>
@@ -51,6 +51,9 @@ private:
 	const int gpu_id;
 	const int max_batch_size;
 	const int profile_count;
+	// IRuntimeはICudaEngineより先に破棄してはならない（TensorRT 10以降の要件）ため、
+	// エンジンと同じ生存期間を持つメンバとして保持する。
+	InferUniquePtr<nvinfer1::IRuntime> runtime;
 	InferUniquePtr<nvinfer1::ICudaEngine> engine;
 	nvinfer1::Dims inputDims1;
 	nvinfer1::Dims inputDims2;
