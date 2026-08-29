@@ -7,11 +7,13 @@
 #include "book.hpp"
 
 #include "cppshogi.h"
+#include "fuseki.hpp"
 #include "UctSearch.h"
 #include "Message.h"
 #include "dfpn.h"
 
 #include <future>
+#include <random>
 #ifdef MAKE_BOOK
 #include <sys/stat.h>
 #endif
@@ -34,8 +36,12 @@ struct MySearcher : Searcher {
 	static std::vector<Move> moves;
 	static std::promise<std::pair<Move, Move>> promise;
 	static std::future<std::pair<Move, Move>> future;
+	// 布石フェーズ（position fuseki）の状態。詳細は cppshogi/fuseki.hpp を参照。
+	static FusekiPosition fusekiPos;
+	static bool inFusekiPhase;
 	static void setPositionAndLimits(Position& pos, std::istringstream& ssCmd, const std::string& posCmd);
 	static void goUct(Position& pos);
+	static void goFuseki(Position& pos);
 #ifndef MULTI_PONDER
 	static void getAndPrintBestMove();
 #else
@@ -45,6 +51,8 @@ struct MySearcher : Searcher {
 
 Key MySearcher::starting_pos_key;
 std::vector<Move> MySearcher::moves;
+FusekiPosition MySearcher::fusekiPos;
+bool MySearcher::inFusekiPhase = false;
 std::promise<std::pair<Move, Move>> MySearcher::promise;
 std::future<std::pair<Move, Move>> MySearcher::future;
 
@@ -179,6 +187,11 @@ void MySearcher::doUSICommandLoop(int argc, char* argv[]) {
 			if (th.joinable())
 				th.join();
 			setPositionAndLimits(pos, ssCmd, posCmd);
+			if (inFusekiPhase) {
+				// 布石フェーズ中はUCT探索・ponderを一切使わず、同期的にbestmoveを返す。
+				goFuseki(pos);
+				continue;
+			}
 			InitUctSearchStop();
 			// ponderhitで探索を継続するため、bestmoveはfutureで受け取る
 			promise = std::promise<std::pair<Move, Move>>();
@@ -445,8 +458,43 @@ void MySearcher::setPositionAndLimits(Position& pos, std::istringstream& ssCmd, 
 		std::string sfen;
 
 		ssPosCmd >> token;
+		const bool isFusekiCommand = (token == "fuseki");
 
-		if (token == "startpos") {
+		if (isFusekiCommand) {
+			// 布石将棋（https://shogitter.com/rule/布石将棋）: 空盤から双方20手ずつ交互に駒を打つ。
+			// 40手（双方20手）に達するまでは FusekiPosition が局面を管理し、pos/states は
+			// 完了した時点で初めて設定する（詳細は cppshogi/fuseki.hpp）。
+			fusekiPos.reset();
+			inFusekiPhase = true;
+			ssPosCmd >> token; // "moves" が入力されるはず。
+
+			while (ssPosCmd >> token) {
+				if (inFusekiPhase) {
+					PieceType pt;
+					Square sq;
+					if (!parseFusekiMoveUSI(token, pt, sq)) break;
+					// USI経由の外部入力のため、形式チェックだけでなく合法手であることも確認する
+					// （FusekiPosition::doDropは合法性を検証しない契約のため）。
+					const auto legal = fusekiPos.legalDrops();
+					if (std::find(legal.begin(), legal.end(), std::make_pair(pt, sq)) == legal.end())
+						break;
+					fusekiPos.doDrop(pt, sq);
+					if (fusekiPos.isPlacementDone()) {
+						pos.set(fusekiPos.toSFEN());
+						states = StateListPtr(new std::deque<StateInfo>(1));
+						starting_pos_key = pos.getKey();
+						inFusekiPhase = false;
+					}
+				}
+				else {
+					const Move move = usiToMove(pos, token);
+					if (!move) break;
+					pos.doMove(move, states->emplace_back());
+					moves.emplace_back(move);
+				}
+			}
+		}
+		else if (token == "startpos") {
 			sfen = DefaultStartPositionSFEN;
 			ssPosCmd >> token; // "moves" が入力されるはず。
 		}
@@ -457,16 +505,19 @@ void MySearcher::setPositionAndLimits(Position& pos, std::istringstream& ssCmd, 
 		else
 			return;
 
-		pos.set(sfen);
-		states = StateListPtr(new std::deque<StateInfo>(1));
+		if (!isFusekiCommand) {
+			inFusekiPhase = false;
+			pos.set(sfen);
+			states = StateListPtr(new std::deque<StateInfo>(1));
 
-		starting_pos_key = pos.getKey();
+			starting_pos_key = pos.getKey();
 
-		while (ssPosCmd >> token) {
-			const Move move = usiToMove(pos, token);
-			if (!move) break;
-			pos.doMove(move, states->emplace_back());
-			moves.emplace_back(move);
+			while (ssPosCmd >> token) {
+				const Move move = usiToMove(pos, token);
+				if (!move) break;
+				pos.doMove(move, states->emplace_back());
+				moves.emplace_back(move);
+			}
 		}
 	}
 
@@ -494,6 +545,32 @@ void MySearcher::setPositionAndLimits(Position& pos, std::istringstream& ssCmd, 
 	}
 
 	SetLimits(&pos, limits);
+}
+
+// 布石フェーズ（position fuseki）の go コマンド処理。NN方策・学習済み重みが未対応のため、
+// 暫定的に合法手からランダムに1手選ぶ（docs/roadmap.md参照）。UCT探索・ponder・時間制御は使わない。
+void MySearcher::goFuseki(Position& pos) {
+	const auto legalMoves = fusekiPos.legalDrops();
+	if (legalMoves.empty()) {
+		// 本来到達しないはずだが（movegenの不変条件、docs/rules.md参照）、
+		// -DNDEBUGビルドではassertが無効化されるため、万一に備えて明示的にガードする。
+		std::cout << "bestmove resign" << std::endl;
+		inFusekiPhase = false;
+		return;
+	}
+	static std::mt19937_64 rng(std::random_device{}());
+	std::uniform_int_distribution<size_t> dist(0, legalMoves.size() - 1);
+	const auto [pt, sq] = legalMoves[dist(rng)];
+
+	fusekiPos.doDrop(pt, sq);
+	std::cout << "bestmove " << fusekiMoveToUSI(pt, sq) << std::endl;
+
+	if (fusekiPos.isPlacementDone()) {
+		pos.set(fusekiPos.toSFEN());
+		states = StateListPtr(new std::deque<StateInfo>(1));
+		starting_pos_key = pos.getKey();
+		inFusekiPhase = false;
+	}
 }
 
 void MySearcher::goUct(Position& pos) {

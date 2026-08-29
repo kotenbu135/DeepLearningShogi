@@ -1,4 +1,5 @@
 #include "fuseki.hpp"
+#include "position.hpp" // g_charToPieceUSI（駒打ち表記の変換のみに使用。Hand/kingSquare_には依存しない）
 #include <cctype>
 
 namespace {
@@ -10,6 +11,10 @@ namespace {
 
     const PieceType DroppablePieceTypes[] = {
         Pawn, Lance, Knight, Silver, Gold, Bishop, Rook, King
+    };
+
+    const char* PieceTypeToCharTable[King + 1] = {
+        "", "P", "L", "N", "S", "B", "R", "G", "K"
     };
 }
 
@@ -98,10 +103,6 @@ void FusekiPosition::doDrop(const PieceType pt, const Square sq) {
 }
 
 std::string FusekiPosition::toSFEN() const {
-    static const char* PieceTypeToCharTable[King + 1] = {
-        "", "P", "L", "N", "S", "B", "R", "G", "K"
-    };
-
     std::string sfen;
     for (Rank r = Rank1; r < RankNum; ++r) {
         if (r != Rank1)
@@ -134,4 +135,25 @@ std::string FusekiPosition::toSFEN() const {
     sfen += " - "; // 布石完了時点で両陣とも持ち駒は全て打ち終えている
     sfen += std::to_string(ply_ + 1);
     return sfen;
+}
+
+std::string fusekiMoveToUSI(const PieceType pt, const Square sq) {
+    return std::string(PieceTypeToCharTable[pt]) + "*" + squareToStringUSI(sq);
+}
+
+bool parseFusekiMoveUSI(const std::string& moveStr, PieceType& pt, Square& sq) {
+    if (moveStr.size() != 4)
+        return false;
+    if (!g_charToPieceUSI.isLegalChar(moveStr[0]))
+        return false;
+    if (moveStr[1] != '*')
+        return false;
+
+    pt = pieceToPieceType(g_charToPieceUSI.value(moveStr[0]));
+    const File file = charUSIToFile(moveStr[2]);
+    const Rank rank = charUSIToRank(moveStr[3]);
+    if (!isInSquare(file, rank))
+        return false;
+    sq = makeSquare(file, rank);
+    return true;
 }

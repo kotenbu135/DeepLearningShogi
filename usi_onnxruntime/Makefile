@@ -4,14 +4,15 @@ CFLAGS = -std=c++17 -Wextra -Ofast -MMD -MP -fopenmp -DONNXRUNTIME -DONNXRUNTIME
 ifneq ($(NYUGYOKU_FEATURES),)
 CFLAGS += -DNYUGYOKU_FEATURES
 endif
+ONNXRUNTIME_DIR ?= /work/onnxruntime-linux-x64-1.14.1
 LDFLAGS = -lpthread -lonnxruntime -flto
-INCLUDE = -I../usi -I../usi_onnxruntime -I../cppshogi -I/work/onnxruntime-linux-x64-1.14.1/include
-LIB = -L/work/onnxruntime-linux-x64-1.14.1/lib
+INCLUDE = -I../usi -I../usi_onnxruntime -I../cppshogi -I$(ONNXRUNTIME_DIR)/include
+LIB = -L$(ONNXRUNTIME_DIR)/lib
 
 target = bin/dlshogi_onnxruntime
 sources = nn_onnxruntime.cpp
 usi_sources = main.cpp dfpn.cpp Message.cpp UctSearch.cpp Node.cpp PvMateSearch.cpp
-cppshogi_sources = bitboard.cpp book.cpp common.cpp cppshogi.cpp generateMoves.cpp hand.cpp init.cpp move.cpp mt64bit.cpp position.cpp search.cpp square.cpp usi.cpp dtype.cpp
+cppshogi_sources = bitboard.cpp book.cpp common.cpp cppshogi.cpp fuseki.cpp generateMoves.cpp hand.cpp init.cpp move.cpp mt64bit.cpp position.cpp search.cpp square.cpp usi.cpp dtype.cpp
 objects = $(addprefix obj/, $(sources:.cpp=.o))
 usi_objects = $(addprefix obj/, $(usi_sources:.cpp=.o))
 cppshogi_objects = $(addprefix obj/, $(cppshogi_sources:.cpp=.o))

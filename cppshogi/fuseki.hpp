@@ -48,4 +48,11 @@ private:
     int ply_;
 };
 
+// 布石フェーズの手を USI 風の駒打ち表記（例: "K*5i"）に変換する。
+// 通常の Move::toUSI() 同様、打つ駒の文字は手番に関わらず大文字。
+std::string fusekiMoveToUSI(PieceType pt, Square sq);
+
+// 上記の逆変換。フォーマット不正なら false を返す。
+bool parseFusekiMoveUSI(const std::string& moveStr, PieceType& pt, Square& sq);
+
 #endif // #ifndef APERY_FUSEKI_HPP
