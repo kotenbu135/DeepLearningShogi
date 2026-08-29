@@ -5,7 +5,7 @@ ifneq ($(NYUGYOKU_FEATURES),)
 CFLAGS += -DNYUGYOKU_FEATURES
 NVCC_CFLAGS += -DNYUGYOKU_FEATURES
 endif
-LDFLAGS = -lpthread -lnvinfer -lnvparsers -lnvonnxparser -lcudart -flto -lboost_system
+LDFLAGS = -lpthread -lnvinfer -lnvonnxparser -lcudart -flto
 INCLUDE = -I../usi -I../cppshogi -I/usr/local/cuda/include -I$(CONDA_PREFIX)/include
 LIB = -L/usr/local/cuda/lib64 -L$(CONDA_PREFIX)/lib
 
