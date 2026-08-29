@@ -176,6 +176,8 @@ bool SPLIT_OPPONENT = false;
 ofstream ofs_opponent;
 bool OUT_MIN_HCP = false;
 ofstream ofs_minhcp;
+// 布石フェーズの指し手ログ（--fuseki指定時、<output>_fusekiへ出力）
+ofstream ofs_fuseki;
 mutex imutex;
 mutex omutex;
 size_t entryNum;
@@ -282,6 +284,25 @@ inline s16 value_to_score(const float value) {
 		return s16(-logf(1.0f / value - 1.0f) * 756.0864962951762f);
 }
 
+// 布石フェーズ（FusekiPosition）の指し手ログ用ファイル形式。
+// hcpe3のMoveInfo/HuffmanCodedPosAndEval3と異なり、玉打ちを表現できる{PieceType, Square}を
+// そのまま記録する（既存のMoveがpieceTypeToHandPiece(King)のセンチネル値により玉打ちを表現できないため）。
+// ファイル内は (FusekiGameHeader, FusekiMoveRecord[moveNum]) の繰り返し。
+// 盤面は保存せず、空盤から先頭より各手を再生することで一意に復元できる（Python側は
+// dlshogi.cppshogi.fuseki_reset/fuseki_do_drop等で再生する）。
+struct FusekiGameHeader {
+	u16 moveNum; // 通常は FusekiPosition::TotalPlies(=40)
+	u8 result;   // HuffmanCodedPosAndEval3.resultと同じ勝敗エンコーディング（下位2bit）
+	u8 reserved; // 将来拡張用、常に0
+};
+static_assert(sizeof(FusekiGameHeader) == 4, "");
+
+struct FusekiMoveRecord {
+	u8 pieceType; // cppshogi/piece.hppのPieceType（fuseki_legal_dropsが返す値と同じ）
+	u8 square;    // cppshogi/square.hppのSquare（fuseki_legal_dropsが返す値と同じ）
+};
+static_assert(sizeof(FusekiMoveRecord) == 2, "");
+
 // 詰み探索スロット
 struct MateSearchEntry {
 	Position *pos;
@@ -330,6 +351,11 @@ public:
 		return mate_search_slot[id].move;
 	}
 	void MateSearch();
+
+	// 布石フェーズ（FusekiPosition）の1局面ぶんの方策・価値をNNへ問い合わせる（バッチ化しない同期呼び出し）。
+	// 呼び出しはSelfPlay()の自スレッドから、他のNN呼び出し（EvalNode()）と同じgroup_idのスロットで
+	// 逐次的に行われるため、スレッド安全性の追加対応は不要（EvalNode()と同じ前提）。
+	void ForwardSingle(packed_features1_t* x1, packed_features2_t* x2, DType* y1, DType* y2);
 
 	int group_id;
 	int gpu_id;
@@ -462,6 +488,20 @@ private:
 		std::vector<MoveVisits> candidates;
 	};
 	std::vector<Record> records;
+
+	// 布石フェーズ（FusekiPosition）で選んだ指し手のログ（PlayFusekiPhase()で記録）
+	std::vector<std::pair<PieceType, Square>> fusekiMoves;
+
+	// 布石フェーズの指し手ログ出力
+	void WriteFusekiRecord(std::ofstream& ofs, GameResult result) {
+		std::unique_lock<Mutex> lock(omutex);
+		FusekiGameHeader header{ static_cast<u16>(fusekiMoves.size()), static_cast<u8>(result), 0 };
+		ofs.write(reinterpret_cast<char*>(&header), sizeof(header));
+		for (const auto& move : fusekiMoves) {
+			FusekiMoveRecord rec{ static_cast<u8>(move.first), static_cast<u8>(move.second) };
+			ofs.write(reinterpret_cast<char*>(&rec), sizeof(rec));
+		}
+	}
 
 	// 局面追加
 	// 訓練に使用しない手はtrainingをfalseにする
@@ -985,6 +1025,11 @@ UCTSearcherGroup::QueuingNode(const Position *pos, uct_node_t* node, float* valu
 	current_policy_value_batch_index++;
 }
 
+void UCTSearcherGroup::ForwardSingle(packed_features1_t* x1, packed_features2_t* x2, DType* y1, DType* y2)
+{
+	parent->nn_forward(group_id, 1, x1, x2, y1, y2);
+}
+
 //////////////////////////
 //  探索打ち止めの確認  //
 //////////////////////////
@@ -1112,9 +1157,37 @@ void UCTSearcherGroup::EvalNode() {
 void UCTSearcher::PlayFusekiPhase()
 {
 	FusekiPosition fusekiPos;
+	fusekiMoves.clear();
+
+	DType y1[MAX_MOVE_LABEL_NUM * (size_t)SquareNum];
+	DType y2[1];
+
 	while (!fusekiPos.isPlacementDone()) {
 		const auto legalMoves = fusekiPos.legalDrops();
-		const auto& move = legalMoves[uniform_int_distribution<size_t>(0, legalMoves.size() - 1)(*mt_64)];
+
+		// NNの方策（1局面ぶんの同期・非バッチ推論）で合法手をソフトマックスサンプリングする
+		packed_features1_t x1;
+		packed_features2_t x2;
+		std::fill_n(x1, sizeof(packed_features1_t), 0);
+		std::fill_n(x2, sizeof(packed_features2_t), 0);
+		make_input_features(fusekiPos, x1, x2);
+		grp->ForwardSingle(&x1, &x2, y1, y2);
+
+		const Color color = fusekiPos.turn();
+		std::vector<double> probs(legalMoves.size());
+		float maxLogit = -FLT_MAX;
+		for (size_t i = 0; i < legalMoves.size(); ++i) {
+			const int label = make_fuseki_move_label(legalMoves[i].first, legalMoves[i].second, color);
+			maxLogit = std::max(maxLogit, (float)y1[label]);
+		}
+		for (size_t i = 0; i < legalMoves.size(); ++i) {
+			const int label = make_fuseki_move_label(legalMoves[i].first, legalMoves[i].second, color);
+			probs[i] = std::exp((double)((float)y1[label] - maxLogit));
+		}
+		discrete_distribution<size_t> dist(probs.begin(), probs.end());
+		const auto& move = legalMoves[dist(*mt_64)];
+
+		fusekiMoves.emplace_back(move);
 		fusekiPos.doDrop(move.first, move.second);
 	}
 	pos_root->set(fusekiPos.toSFEN());
@@ -1583,6 +1656,11 @@ void UCTSearcher::NextGame()
 		}
 	}
 
+	// 布石フェーズの指し手ログ出力（通常フェーズの手数に関わらず、40手の配置は毎回完了しているため出力する）
+	if (FUSEKI_START) {
+		WriteFusekiRecord(ofs_fuseki, gameResult);
+	}
+
 	// USIエンジンとの対局結果
 	if (ply >= MIN_MOVE && usi_engine_turn >= 0) {
 		++usi_games;
@@ -1652,6 +1730,8 @@ void make_teacher(const char* recordFileName, const char* outputFileName, const 
 	}
 	// 削除候補の初期局面を出力するファイル
 	if (OUT_MIN_HCP) ofs_minhcp.open(string(outputFileName) + "_min.hcp", ios::binary);
+	// 布石フェーズの指し手ログ
+	if (FUSEKI_START) ofs_fuseki.open(string(outputFileName) + "_fuseki", ios::binary);
 
 	vector<UCTSearcherGroupPair> group_pairs;
 	group_pairs.reserve(gpu_id.size());
@@ -1717,6 +1797,7 @@ void make_teacher(const char* recordFileName, const char* outputFileName, const 
 	ofs.close();
 	if (SPLIT_OPPONENT) ofs_opponent.close();
 	if (OUT_MIN_HCP) ofs_minhcp.close();
+	if (FUSEKI_START) ofs_fuseki.close();
 
 	logger->info("Made {} teacher nodes in {} seconds. games:{}, draws:{}, ply/game:{}, usi_games:{}, usi_win:{}, usi_draw:{}, usi_winrate:{:.2f}%",
 		madeTeacherNodes, t.elapsed_msec() / 1000,
