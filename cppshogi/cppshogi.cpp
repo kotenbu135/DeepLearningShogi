@@ -2,6 +2,7 @@
 #include <algorithm>
 
 #include "cppshogi.h"
+#include "fuseki.hpp"
 
 inline void set_features1(features1_t features1, const Color c, const int f1idx, const Square sq)
 {
@@ -169,6 +170,83 @@ void make_input_features(const Position& position, packed_features1_t packed_fea
 		make_input_features<White, packed_features1_t, packed_features2_t>(position, packed_features1, packed_features2);
 }
 
+// make input features (布石フェーズ)
+// Position版と同じテンソルレイアウトを、board_/remaining_から直接組み立てる。
+// 玉の残数(0 or 1)は末尾のMAX_FEATURES2_KING_NUMプレーンに、王手・入玉特徴量は
+// 布石フェーズでは評価対象外のため常に0のまま(呼び出し側が事前にゼロ初期化している前提)。
+template <Color turn, typename T1 = features1_t, typename T2 = features2_t>
+inline void make_input_features(const FusekiPosition& fusekiPos, T1 features1, T2 features2) {
+	Bitboard occupied_bb = allZeroBB();
+	for (Square sq = SQ11; sq < SquareNum; ++sq) {
+		if (fusekiPos.pieceOn(sq) != Empty)
+			occupied_bb.setBit(sq);
+	}
+
+	int attack_num[ColorNum][SquareNum] = {};
+
+	for (Square sq = SQ11; sq < SquareNum; ++sq) {
+		const Piece pc = fusekiPos.pieceOn(sq);
+		if (pc == Empty)
+			continue;
+
+		const PieceType pt = pieceToPieceType(pc);
+		Color c = pieceToColor(pc);
+		Bitboard attacks = Position::attacksFrom(pt, c, sq, occupied_bb);
+
+		Square dstSq = sq;
+		if (turn == White) {
+			c = oppositeColor(c);
+			dstSq = SQ99 - sq;
+		}
+
+		// 駒の配置
+		set_features1(features1, c, pt - 1, dstSq);
+
+		FOREACH_BB(attacks, Square to, {
+			if (turn == White) to = SQ99 - to;
+
+			// 駒の利き
+			set_features1(features1, c, PIECETYPE_NUM + pt - 1, to);
+
+			// 利き数
+			auto& num = attack_num[c][to];
+			if (num < MAX_ATTACK_NUM) {
+				set_features1(features1, c, PIECETYPE_NUM + PIECETYPE_NUM + num, to);
+				num++;
+			}
+		});
+	}
+
+	for (Color c = Black; c < ColorNum; ++c) {
+		// 後手の場合、色を反転
+		const Color c2 = turn == Black ? c : oppositeColor(c);
+
+		// 布石フェーズの「残り持ち駒」は、通常フェーズのHandと同じ意味（まだ盤上に置いていない枚数）。
+		set_features2(features2, c2, 0, std::min((u32)fusekiPos.remaining(c, Pawn), (u32)MAX_HPAWN_NUM));
+		set_features2(features2, c2, MAX_HPAWN_NUM, (u32)fusekiPos.remaining(c, Lance));
+		set_features2(features2, c2, MAX_HPAWN_NUM + MAX_HLANCE_NUM, (u32)fusekiPos.remaining(c, Knight));
+		set_features2(features2, c2, MAX_HPAWN_NUM + MAX_HLANCE_NUM + MAX_HKNIGHT_NUM, (u32)fusekiPos.remaining(c, Silver));
+		set_features2(features2, c2, MAX_HPAWN_NUM + MAX_HLANCE_NUM + MAX_HKNIGHT_NUM + MAX_HSILVER_NUM, (u32)fusekiPos.remaining(c, Gold));
+		set_features2(features2, c2, MAX_HPAWN_NUM + MAX_HLANCE_NUM + MAX_HKNIGHT_NUM + MAX_HSILVER_NUM + MAX_HGOLD_NUM, (u32)fusekiPos.remaining(c, Bishop));
+		set_features2(features2, c2, MAX_HPAWN_NUM + MAX_HLANCE_NUM + MAX_HKNIGHT_NUM + MAX_HSILVER_NUM + MAX_HGOLD_NUM + MAX_HBISHOP_NUM, (u32)fusekiPos.remaining(c, Rook));
+
+		// 玉がまだ持ち駒に残っている（末尾に追加したプレーン）
+		if (fusekiPos.remaining(c, King) > 0) {
+			set_features2(features2, (int)(MAX_FEATURES2_NUM - MAX_FEATURES2_KING_NUM) + (int)c2);
+		}
+	}
+}
+
+void make_input_features(const FusekiPosition& fusekiPos, features1_t features1, features2_t features2) {
+	fusekiPos.turn() == Black ? make_input_features<Black>(fusekiPos, features1, features2) : make_input_features<White>(fusekiPos, features1, features2);
+}
+
+void make_input_features(const FusekiPosition& fusekiPos, packed_features1_t packed_features1, packed_features2_t packed_features2) {
+	fusekiPos.turn() == Black ?
+		make_input_features<Black, packed_features1_t, packed_features2_t>(fusekiPos, packed_features1, packed_features2) :
+		make_input_features<White, packed_features1_t, packed_features2_t>(fusekiPos, packed_features1, packed_features2);
+}
+
 inline MOVE_DIRECTION get_move_direction(const int dir_x, const int dir_y) {
 	if (dir_y < 0 && dir_x == 0) {
 		return UP;
@@ -245,4 +323,17 @@ int make_move_label(const u16 move16, const Color color) {
 		const int move_direction_label = MOVE_DIRECTION_NUM + hand_piece;
 		return 9 * 9 * move_direction_label + to_sq;
 	}
+}
+
+// 布石フェーズの駒打ちを方策ラベルに変換する。make_move_label()の駒打ち分岐と同じ式だが、
+// Kingはpieces-in-handのMove表現(Hand::minusOne等)を経由しないため、直接(PieceType, Square)から計算する。
+// KingはHandPieceNum(=7)番目として末尾に割り当てる（MAX_MOVE_LABEL_NUMの+1と対応）。
+int make_fuseki_move_label(const PieceType pt, Square to, const Color color) {
+	// 白の場合、盤面を180度回転
+	if (color == White) {
+		to = SQ99 - to;
+	}
+	const int hand_piece = (pt == King) ? (int)HandPieceNum : (int)pieceTypeToHandPiece(pt);
+	const int move_direction_label = MOVE_DIRECTION_NUM + hand_piece;
+	return 9 * 9 * move_direction_label + to;
 }

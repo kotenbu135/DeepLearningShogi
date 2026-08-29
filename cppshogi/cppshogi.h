@@ -36,11 +36,14 @@ constexpr u32 MAX_FEATURES2_NYUGYOKU_NUM = 1/*入玉*/ + MAX_NYUGYOKU_OPP_FIELD 
 constexpr int PIECETYPE_NUM = 14; // 駒の種類
 constexpr int MAX_ATTACK_NUM = 3; // 利き数の最大値
 constexpr u32 MAX_FEATURES1_NUM = PIECETYPE_NUM/*駒の配置*/ + PIECETYPE_NUM/*駒の利き*/ + MAX_ATTACK_NUM/*利き数*/;
+// 布石フェーズ（fuseki.hpp）専用: 玉がまだ持ち駒に残っているか（各色1チャンネル）。
+// 通常フェーズでは常に0。既存の学習済みネットワークとの重み互換のため、既存プレーンの後ろに追加する。
+constexpr u32 MAX_FEATURES2_KING_NUM = (int)ColorNum;
 constexpr u32 MAX_FEATURES2_NUM = MAX_FEATURES2_HAND_NUM + 1/*王手*/
 #ifdef NYUGYOKU_FEATURES
     + (int)ColorNum * MAX_FEATURES2_NYUGYOKU_NUM
 #endif
-;
+    + MAX_FEATURES2_KING_NUM;
 
 // 移動の定数
 enum MOVE_DIRECTION {
@@ -50,7 +53,8 @@ enum MOVE_DIRECTION {
 };
 
 // 指し手を表すラベルの数
-constexpr int MAX_MOVE_LABEL_NUM = MOVE_DIRECTION_NUM + HandPieceNum;
+// +1 は布石フェーズの玉打ち（HandPieceには玉のスロットが無いため、末尾に追加する）。
+constexpr int MAX_MOVE_LABEL_NUM = MOVE_DIRECTION_NUM + HandPieceNum + 1;
 
 typedef char packed_features1_t[((size_t)ColorNum * MAX_FEATURES1_NUM * (size_t)SquareNum + 7) / 8];
 typedef char packed_features2_t[((size_t)MAX_FEATURES2_NUM + 7) / 8];
@@ -61,6 +65,16 @@ typedef DType features2_t[MAX_FEATURES2_NUM][SquareNum];
 void make_input_features(const Position& position, features1_t features1, features2_t features2);
 void make_input_features(const Position& position, packed_features1_t packed_features1, packed_features2_t packed_features2);
 int make_move_label(const u16 move16, const Color color);
+
+// 布石フェーズ（cppshogi/fuseki.hpp）専用。
+// FusekiPositionはPositionが前提とする「玉は必ず盤上に1枚ある」という不変条件を満たさない
+// （0または1枚）ため、Position::set()を経由せずboard_/remaining_から直接特徴量を組み立てる。
+class FusekiPosition;
+void make_input_features(const FusekiPosition& fusekiPos, features1_t features1, features2_t features2);
+void make_input_features(const FusekiPosition& fusekiPos, packed_features1_t packed_features1, packed_features2_t packed_features2);
+// 布石フェーズの駒打ち（King含む）を方策ラベルに変換する。make_move_label()と同じレイアウトの延長で、
+// Kingはhand_piece = HandPieceNum（末尾）として扱う。
+int make_fuseki_move_label(const PieceType pt, const Square to, const Color color);
 
 // 評価値から価値(勝率)に変換
 // スケールパラメータは、elmo_for_learnの勝率から調査した値

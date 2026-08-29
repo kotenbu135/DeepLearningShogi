@@ -2066,3 +2066,25 @@ bool __fuseki_verify_final_sfen(const std::string& sfen) {
 
     return true;
 }
+
+void __fuseki_make_input_features(char* ndfeatures1, char* ndfeatures2) {
+    features1_t* features1 = reinterpret_cast<features1_t*>(ndfeatures1);
+    features2_t* features2 = reinterpret_cast<features2_t*>(ndfeatures2);
+    std::fill_n((float*)features1, sizeof(features1_t) / sizeof(float), 0.0f);
+    std::fill_n((float*)features2, sizeof(features2_t) / sizeof(float), 0.0f);
+    make_input_features(g_fusekiPos, *features1, *features2);
+}
+
+int __fuseki_move_label(int pieceType, int square, int color) {
+    return make_fuseki_move_label(static_cast<PieceType>(pieceType), static_cast<Square>(square), static_cast<Color>(color));
+}
+
+void __make_input_features_from_sfen(const std::string& sfen, char* ndfeatures1, char* ndfeatures2) {
+    features1_t* features1 = reinterpret_cast<features1_t*>(ndfeatures1);
+    features2_t* features2 = reinterpret_cast<features2_t*>(ndfeatures2);
+    std::fill_n((float*)features1, sizeof(features1_t) / sizeof(float), 0.0f);
+    std::fill_n((float*)features2, sizeof(features2_t) / sizeof(float), 0.0f);
+    Position pos;
+    pos.set(sfen);
+    make_input_features(pos, *features1, *features2);
+}

@@ -33,6 +33,7 @@ public:
     Color turn() const { return turn_; }
     int ply() const { return ply_; }
     int remaining(Color c, PieceType pt) const { return remaining_[c][pt]; }
+    Piece pieceOn(Square sq) const { return board_[sq]; }
 
     // 40手完了後に呼ぶ。通常の Position::set(sfen) にそのまま渡せる文字列を返す。
     std::string toSFEN() const;

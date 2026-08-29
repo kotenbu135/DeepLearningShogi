@@ -41,3 +41,10 @@ int __fuseki_remaining(int color, int pieceType);
 std::string __fuseki_to_sfen();
 // sfenを実際にPosition::set()で読み込み、王1枚ずつ・盤上40枚・持ち駒0・41手目、を満たすか検証する。
 bool __fuseki_verify_final_sfen(const std::string& sfen);
+// 現在のグローバル局面からNN入力特徴量を作る（features1/features2は事前にゼロ初期化されたバッファ）。
+void __fuseki_make_input_features(char* ndfeatures1, char* ndfeatures2);
+// 布石フェーズの駒打ちを方策ラベルに変換する。
+int __fuseki_move_label(int pieceType, int square, int color);
+// テスト用: sfenを実際のPosition::set()で読み込み、通常経路のmake_input_features()で特徴量を作る。
+// FusekiPosition経由の特徴量（__fuseki_make_input_features）とのテンソル等価性を検証するために使う。
+void __make_input_features_from_sfen(const std::string& sfen, char* ndfeatures1, char* ndfeatures2);

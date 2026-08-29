@@ -8,7 +8,8 @@ MOVE_DIRECTION = [
 ] = range(20)
 
 # 指し手を表すラベルの数
-MAX_MOVE_LABEL_NUM = len(MOVE_DIRECTION) + 7 # 7はhand piece
+# +1 は布石フェーズ（fuseki）の玉打ち。HandPieceに玉のスロットが無いため末尾に追加する。
+MAX_MOVE_LABEL_NUM = len(MOVE_DIRECTION) + 7 + 1 # 7はhand piece
 
 MAX_PIECES_IN_HAND = [
     8, # 歩の持ち駒の上限
@@ -25,8 +26,9 @@ MAX_PIECES_IN_HAND_SUM = sum(MAX_PIECES_IN_HAND)
 PIECETYPE_NUM = 14 # 駒の種類
 MAX_ATTACK_NUM = 3 # 利き数の最大値
 MAX_FEATURES2_NYUGYOKU_NUM = get_max_features2_nyugyoku_num() # 入玉特徴量の数
+MAX_FEATURES2_KING_NUM = 2 # 布石フェーズ: 玉がまだ持ち駒に残っているか（各色1チャンネル）。通常フェーズでは常に0
 FEATURES1_NUM = 2 * (PIECETYPE_NUM + PIECETYPE_NUM + MAX_ATTACK_NUM)
-FEATURES2_NUM = 2 * MAX_PIECES_IN_HAND_SUM + 1 + 2 * MAX_FEATURES2_NYUGYOKU_NUM
+FEATURES2_NUM = 2 * MAX_PIECES_IN_HAND_SUM + 1 + 2 * MAX_FEATURES2_NYUGYOKU_NUM + MAX_FEATURES2_KING_NUM
 
 HuffmanCodedPosAndEval = np.dtype([
     ('hcp', np.uint8, 32),

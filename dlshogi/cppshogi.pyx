@@ -44,6 +44,9 @@ cdef extern from "python_module.h" nogil:
     int __fuseki_remaining(int color, int pieceType)
     string __fuseki_to_sfen()
     bool __fuseki_verify_final_sfen(const string& sfen)
+    void __fuseki_make_input_features(char* ndfeatures1, char* ndfeatures2)
+    int __fuseki_move_label(int pieceType, int square, int color)
+    void __make_input_features_from_sfen(const string& sfen, char* ndfeatures1, char* ndfeatures2)
 
 init()
 
@@ -162,3 +165,14 @@ def fuseki_to_sfen():
 
 def fuseki_verify_final_sfen(str sfen):
     return __fuseki_verify_final_sfen(sfen.encode('ascii'))
+
+# ndfeatures1/ndfeatures2は呼び出し側があらかじめ確保する
+# （dlshogi.common.FEATURES1_NUM/FEATURES2_NUMに基づく(*, 9, 9)形状。他のdecode系関数と同じ規約）。
+def fuseki_make_input_features(np.ndarray ndfeatures1, np.ndarray ndfeatures2):
+    __fuseki_make_input_features(ndfeatures1.data, ndfeatures2.data)
+
+def fuseki_move_label(int piece_type, int square, int color):
+    return __fuseki_move_label(piece_type, square, color)
+
+def make_input_features_from_sfen(str sfen, np.ndarray ndfeatures1, np.ndarray ndfeatures2):
+    __make_input_features_from_sfen(sfen.encode('ascii'), ndfeatures1.data, ndfeatures2.data)
