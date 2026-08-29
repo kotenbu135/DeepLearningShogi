@@ -35,6 +35,16 @@ cdef extern from "python_module.h" nogil:
     void __hcpe3_merge(const vector[string]& files, const string& out, const bool outMaxmove, const bool outMate, const bool outBrinkmate) except +
     unsigned int __get_max_features2_nyugyoku_num()
 
+    void __fuseki_reset()
+    int __fuseki_legal_drops(int* outPieceTypes, int* outSquares, int maxCount)
+    void __fuseki_do_drop(int pieceType, int square)
+    bool __fuseki_is_placement_done()
+    int __fuseki_turn()
+    int __fuseki_ply()
+    int __fuseki_remaining(int color, int pieceType)
+    string __fuseki_to_sfen()
+    bool __fuseki_verify_final_sfen(const string& sfen)
+
 init()
 
 def hcpe_decode_with_value(np.ndarray ndhcpe, np.ndarray ndfeatures1, np.ndarray ndfeatures2, np.ndarray ndmove, np.ndarray ndresult, np.ndarray ndvalue):
@@ -119,3 +129,36 @@ def hcpe3_merge(files, str out, bool out_maxmove=False, bool out_mate=False, boo
 
 def get_max_features2_nyugyoku_num():
     return __get_max_features2_nyugyoku_num()
+
+# 布石将棋の布石フェーズ（グローバルに1局面だけ保持する軽量な状態）
+FUSEKI_MAX_MOVES = 400
+
+def fuseki_reset():
+    __fuseki_reset()
+
+def fuseki_legal_drops():
+    cdef np.ndarray ndPieceTypes = np.empty(FUSEKI_MAX_MOVES, dtype=np.int32)
+    cdef np.ndarray ndSquares = np.empty(FUSEKI_MAX_MOVES, dtype=np.int32)
+    cdef int n = __fuseki_legal_drops(<int*>ndPieceTypes.data, <int*>ndSquares.data, FUSEKI_MAX_MOVES)
+    return [(int(ndPieceTypes[i]), int(ndSquares[i])) for i in range(n)]
+
+def fuseki_do_drop(int piece_type, int square):
+    __fuseki_do_drop(piece_type, square)
+
+def fuseki_is_placement_done():
+    return __fuseki_is_placement_done()
+
+def fuseki_turn():
+    return __fuseki_turn()
+
+def fuseki_ply():
+    return __fuseki_ply()
+
+def fuseki_remaining(int color, int piece_type):
+    return __fuseki_remaining(color, piece_type)
+
+def fuseki_to_sfen():
+    return __fuseki_to_sfen().decode('ascii')
+
+def fuseki_verify_final_sfen(str sfen):
+    return __fuseki_verify_final_sfen(sfen.encode('ascii'))

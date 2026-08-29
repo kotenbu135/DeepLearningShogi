@@ -12,6 +12,7 @@
 #include <vector>
 #include <omp.h>
 #include "cppshogi.h"
+#include "fuseki.hpp"
 
 void init() {
     initTable();
@@ -2003,4 +2004,65 @@ unsigned int __get_max_features2_nyugyoku_num() {
 #else
     return 0;
 #endif
+}
+
+namespace {
+    FusekiPosition g_fusekiPos;
+}
+
+void __fuseki_reset() {
+    g_fusekiPos.reset();
+}
+
+int __fuseki_legal_drops(int* outPieceTypes, int* outSquares, int maxCount) {
+    const auto moves = g_fusekiPos.legalDrops();
+    const int n = std::min(static_cast<int>(moves.size()), maxCount);
+    for (int i = 0; i < n; ++i) {
+        outPieceTypes[i] = static_cast<int>(moves[i].first);
+        outSquares[i] = static_cast<int>(moves[i].second);
+    }
+    return static_cast<int>(moves.size());
+}
+
+void __fuseki_do_drop(int pieceType, int square) {
+    g_fusekiPos.doDrop(static_cast<PieceType>(pieceType), static_cast<Square>(square));
+}
+
+bool __fuseki_is_placement_done() {
+    return g_fusekiPos.isPlacementDone();
+}
+
+int __fuseki_turn() {
+    return static_cast<int>(g_fusekiPos.turn());
+}
+
+int __fuseki_ply() {
+    return g_fusekiPos.ply();
+}
+
+int __fuseki_remaining(int color, int pieceType) {
+    return g_fusekiPos.remaining(static_cast<Color>(color), static_cast<PieceType>(pieceType));
+}
+
+std::string __fuseki_to_sfen() {
+    return g_fusekiPos.toSFEN();
+}
+
+bool __fuseki_verify_final_sfen(const std::string& sfen) {
+    Position pos;
+    pos.set(sfen);
+    if (pos.bbOf(King, Black).popCount() != 1) return false;
+    if (pos.bbOf(King, White).popCount() != 1) return false;
+    if (pos.occupiedBB().popCount() != 40) return false;
+    if (pos.hand(Black).value() != 0) return false;
+    if (pos.hand(White).value() != 0) return false;
+    if (pos.gamePly() != 41) return false;
+
+    // 二歩回避ルールの核心: 各筋に、各色の歩がちょうど1枚ずつあること。
+    for (File f = File1; f < FileNum; ++f) {
+        if ((pos.bbOf(Pawn, Black) & fileMask(f)).popCount() != 1) return false;
+        if ((pos.bbOf(Pawn, White) & fileMask(f)).popCount() != 1) return false;
+    }
+
+    return true;
 }

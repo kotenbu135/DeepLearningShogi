@@ -32,7 +32,7 @@ if NYUGYOKU_FEATURES:
 ext_modules = [
     Extension('dlshogi.cppshogi',
         ['dlshogi/cppshogi.pyx',
-         'cppshogi/cppshogi.cpp', 'cppshogi/python_module.cpp', 'cppshogi/bitboard.cpp', 'cppshogi/book.cpp', 'cppshogi/common.cpp', 'cppshogi/generateMoves.cpp', 'cppshogi/hand.cpp', 'cppshogi/init.cpp', 'cppshogi/move.cpp', 'cppshogi/mt64bit.cpp', 'cppshogi/position.cpp', 'cppshogi/search.cpp', 'cppshogi/square.cpp', 'cppshogi/usi.cpp'],
+         'cppshogi/cppshogi.cpp', 'cppshogi/python_module.cpp', 'cppshogi/bitboard.cpp', 'cppshogi/book.cpp', 'cppshogi/common.cpp', 'cppshogi/fuseki.cpp', 'cppshogi/generateMoves.cpp', 'cppshogi/hand.cpp', 'cppshogi/init.cpp', 'cppshogi/move.cpp', 'cppshogi/mt64bit.cpp', 'cppshogi/position.cpp', 'cppshogi/search.cpp', 'cppshogi/square.cpp', 'cppshogi/usi.cpp'],
         language='c++',
         include_dirs = ["cppshogi"],
         define_macros=ext_macros)
