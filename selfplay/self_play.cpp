@@ -24,6 +24,7 @@
 #include "USIEngine.h"
 
 #include "cppshogi.h"
+#include "fuseki.hpp"
 
 #include "cxxopts/cxxopts.hpp"
 
@@ -94,6 +95,10 @@ constexpr int64_t MATE_SEARCH_MIN_NODE = 10000;
 
 // モデルのパス
 string model_path;
+
+// 初期局面をhcpファイルから読む代わりに、布石フェーズ（FusekiPosition）を
+// ランダムな合法手でプレイアウトして開始局面を作る（自己対局パイプラインへの布石統合）
+bool FUSEKI_START = false;
 
 int playout_num = 1000;
 
@@ -373,7 +378,7 @@ public:
 		id(id),
 		mt_64(new std::mt19937_64(std::chrono::system_clock::now().time_since_epoch().count() + id)),
 		mt(new std::mt19937((unsigned int)std::chrono::system_clock::now().time_since_epoch().count() + id)),
-		inputFileDist(0, entryNum - 1),
+		inputFileDist(0, entryNum > 0 ? entryNum - 1 : 0),
 		max_playout_num(playout_num),
 		playout(0),
 		ply(0),
@@ -401,6 +406,7 @@ private:
 	bool InterruptionCheck(const int playout_count, const int extension_times);
 	void NextPly(const Move move);
 	void NextGame();
+	void PlayFusekiPhase();
 
 	// キャッシュからnnrateをコピー
 	void CopyNNRate(uct_node_t* node, const vector<float>& nnrate) {
@@ -1101,6 +1107,20 @@ void UCTSearcherGroup::EvalNode() {
 	}
 }
 
+// 布石フェーズ（FusekiPosition）をランダムな合法手でプレイアウトし、
+// 完了局面（41手目、通常フェーズの開始局面）をpos_root/hcpに反映する
+void UCTSearcher::PlayFusekiPhase()
+{
+	FusekiPosition fusekiPos;
+	while (!fusekiPos.isPlacementDone()) {
+		const auto legalMoves = fusekiPos.legalDrops();
+		const auto& move = legalMoves[uniform_int_distribution<size_t>(0, legalMoves.size() - 1)(*mt_64)];
+		fusekiPos.doDrop(move.first, move.second);
+	}
+	pos_root->set(fusekiPos.toSFEN());
+	hcp = pos_root->toHuffmanCodedPos();
+}
+
 // シミュレーションを1回行う
 void UCTSearcher::Playout(visitor_t& visitor)
 {
@@ -1112,13 +1132,19 @@ void UCTSearcher::Playout(visitor_t& visitor)
 			if (ply == 0) {
 				ply = 1;
 
-				// 開始局面を局面集からランダムに選ぶ
-				{
-					std::unique_lock<Mutex> lock(imutex);
-					ifs.seekg(inputFileDist(*mt_64) * sizeof(HuffmanCodedPos), std::ios_base::beg);
-					ifs.read(reinterpret_cast<char*>(&hcp), sizeof(hcp));
+				if (FUSEKI_START) {
+					// 布石フェーズ（双方20手のランダムな駒配置）をプレイアウトして開始局面を作る
+					PlayFusekiPhase();
 				}
-				setPosition(*pos_root, hcp);
+				else {
+					// 開始局面を局面集からランダムに選ぶ
+					{
+						std::unique_lock<Mutex> lock(imutex);
+						ifs.seekg(inputFileDist(*mt_64) * sizeof(HuffmanCodedPos), std::ios_base::beg);
+						ifs.read(reinterpret_cast<char*>(&hcp), sizeof(hcp));
+					}
+					setPosition(*pos_root, hcp);
+				}
 				SPDLOG_DEBUG(logger, "gpu_id:{} group_id:{} id:{} ply:{} {}", grp->gpu_id, grp->group_id, id, ply, pos_root->toSFEN());
 
 				records.clear();
@@ -1590,17 +1616,24 @@ void make_teacher(const char* recordFileName, const char* outputFileName, const 
 {
 	s.init();
 
-	// 初期局面集
-	ifs.open(recordFileName, ifstream::in | ifstream::binary | ios::ate);
-	if (!ifs) {
-		cerr << "Error: cannot open " << recordFileName << endl;
-		exit(EXIT_FAILURE);
+	if (FUSEKI_START) {
+		// 開始局面は布石フェーズ（FusekiPosition）のランダムプレイアウトで作るため、
+		// hcpファイルは読まない
+		entryNum = 0;
 	}
-	entryNum = ifs.tellg() / sizeof(HuffmanCodedPos);
-    if (entryNum == 0) {
-        cerr << "empty hcp file" << endl;
-        exit(EXIT_FAILURE);
-    }
+	else {
+		// 初期局面集
+		ifs.open(recordFileName, ifstream::in | ifstream::binary | ios::ate);
+		if (!ifs) {
+			cerr << "Error: cannot open " << recordFileName << endl;
+			exit(EXIT_FAILURE);
+		}
+		entryNum = ifs.tellg() / sizeof(HuffmanCodedPos);
+		if (entryNum == 0) {
+			cerr << "empty hcp file" << endl;
+			exit(EXIT_FAILURE);
+		}
+	}
 
     // 教師局面を保存するファイル
 	ofs.open(outputFileName, ios::binary);
@@ -1713,7 +1746,7 @@ int main(int argc, char* argv[]) {
 	try {
 		options.add_options()
 			("modelfile", "model file path", cxxopts::value<std::string>(model_path))
-			("hcp", "initial position file", cxxopts::value<std::string>(recordFileName))
+			("hcp", "initial position file (--fusekiを指定した場合は無視される。ダミー値を指定すること)", cxxopts::value<std::string>(recordFileName))
 			("output", "output file path", cxxopts::value<std::string>(outputFileName))
 			("nodes", "nodes", cxxopts::value<s64>(teacherNodes))
 			("playout_num", "playout number", cxxopts::value<int>(playout_num))
@@ -1745,6 +1778,7 @@ int main(int argc, char* argv[]) {
 			("nn_cache_size", "nn cache size", cxxopts::value<unsigned int>(nn_cache_size)->default_value("8388608"))
 			("split_opponent", "split opponent's hcpe3", cxxopts::value<bool>(SPLIT_OPPONENT)->default_value("false"))
 			("out_min_hcp", "output minimum move hcp", cxxopts::value<bool>(OUT_MIN_HCP)->default_value("false"))
+			("fuseki", "hcpファイルの代わりに布石フェーズ（FusekiPosition）のランダムな駒配置プレイアウトを開始局面に使う", cxxopts::value<bool>(FUSEKI_START)->default_value("false"))
 			("usi_engine", "USIEngine exe path", cxxopts::value<std::string>(usi_engine_path))
 			("usi_engine_num", "USIEngine number", cxxopts::value<int>(usi_engine_num)->default_value("0"), "num")
 			("usi_threads", "USIEngine thread number", cxxopts::value<int>(usi_threads)->default_value("1"), "num")
@@ -1875,6 +1909,7 @@ int main(int argc, char* argv[]) {
 	logger->info("nn_cache_size:{}", nn_cache_size);
 	if (SPLIT_OPPONENT) logger->info("split_opponent");
 	if (OUT_MIN_HCP) logger->info("out_min_hcp");
+	if (FUSEKI_START) logger->info("fuseki");
 	logger->info("usi_engine:{}", usi_engine_path);
 	logger->info("usi_engine_num:{}", usi_engine_num);
 	logger->info("usi_threads:{}", usi_threads);
