@@ -63,6 +63,14 @@ def main(*argv):
     parser.add_argument('--temperature', type=float, default=1.0)
     parser.add_argument('--patch', type=str, help='Overwrite with the hcpe')
     parser.add_argument('--cache', type=str, help='training data cache file')
+    parser.add_argument('--freeze_bn', action='store_true',
+                         help='keep BatchNorm running_mean/running_var frozen (eval-mode stats) while still '
+                              'updating other parameters by gradient. Use when fine-tuning a model on a small '
+                              'dataset that is much narrower than the corpus the running stats were estimated '
+                              'on (e.g. per-iteration self-play data): without this, ~1 epoch over a few '
+                              'thousand positions is enough to overwrite the running stats with an EMA of the '
+                              'narrow new data (default BatchNorm momentum=0.1), which degrades playing '
+                              'strength independently of --lr/--weight_decay.')
     args = parser.parse_args(argv)
 
     if args.log:
@@ -322,6 +330,12 @@ def main(*argv):
             steps += 1
             with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
                 compiled_model.train()
+                if args.freeze_bn:
+                    # train()直後にBatchNorm系のみeval()へ戻し、running_mean/running_varの更新を止める
+                    # （重み・biasの勾配学習は継続する）。理由は--freeze_bnのhelp参照。
+                    for m in model.modules():
+                        if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+                            m.eval()
 
                 y1, y2 = compiled_model(x1, x2)
 

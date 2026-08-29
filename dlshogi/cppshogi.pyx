@@ -48,6 +48,8 @@ cdef extern from "python_module.h" nogil:
     int __fuseki_move_label(int pieceType, int square, int color)
     bool __fuseki_parse_usi_move(const string& moveStr, int* outPieceType, int* outSquare)
     void __make_input_features_from_sfen(const string& sfen, char* ndfeatures1, char* ndfeatures2)
+    string __debug_hcp_to_sfen(const char* rawHcpe)
+    bool __debug_hcpe_move_legal(const char* rawHcpe)
 
 init()
 
@@ -186,3 +188,11 @@ def fuseki_parse_usi_move(str move_str):
 
 def make_input_features_from_sfen(str sfen, np.ndarray ndfeatures1, np.ndarray ndfeatures2):
     __make_input_features_from_sfen(sfen.encode('ascii'), ndfeatures1.data, ndfeatures2.data)
+
+# デバッグ用: hcpe3_get_hcpeが返す生のHuffmanCodedPosAndEvalバイト列(38バイト)を検証する。
+def debug_hcp_to_sfen(bytes raw_hcpe):
+    cdef string sfen = __debug_hcp_to_sfen(raw_hcpe)
+    return sfen.decode('ascii') if sfen.size() > 0 else None
+
+def debug_hcpe_move_legal(bytes raw_hcpe):
+    return __debug_hcpe_move_legal(raw_hcpe)

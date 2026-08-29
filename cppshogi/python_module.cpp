@@ -2100,3 +2100,26 @@ void __make_input_features_from_sfen(const std::string& sfen, char* ndfeatures1,
     pos.set(sfen);
     make_input_features(pos, *features1, *features2);
 }
+
+// デバッグ用: hcpe3_get_hcpeが返す生のHuffmanCodedPosAndEval（38バイト）を実際にPosition::set()で
+// 復元し、SFEN文字列を返す（selfplay --fusekiが出力したhcpe3データの局面が壊れていないかの検証用）。
+// 復元失敗（不正なHuffman符号）なら空文字列を返す。
+std::string __debug_hcp_to_sfen(const char* rawHcpe) {
+    const HuffmanCodedPosAndEval* hcpe = reinterpret_cast<const HuffmanCodedPosAndEval*>(rawHcpe);
+    Position pos;
+    if (!pos.set(hcpe->hcp)) return "";
+    return pos.toSFEN();
+}
+
+// デバッグ用: 上と同じ局面で、記録されたbestMove16がその局面において合法な指し手かどうかを返す。
+bool __debug_hcpe_move_legal(const char* rawHcpe) {
+    const HuffmanCodedPosAndEval* hcpe = reinterpret_cast<const HuffmanCodedPosAndEval*>(rawHcpe);
+    Position pos;
+    if (!pos.set(hcpe->hcp)) return false;
+    const Move move = move16toMove(Move(hcpe->bestMove16), pos);
+    // Position::moveIsLegal()は#if !defined NDEBUGでしかコンパイルされない（デバッグ専用assert補助）上、
+    // それが使うgenerateMoves<LegalAll>自体も!NDEBUG||LEARN限定でしかインスタンス化されずリリース
+    // ビルドではリンクできない。MoveList<Legal>（常にインスタンス化される、通常の合法手生成）への
+    // 包含判定で代用する。
+    return MoveList<Legal>(pos).contains(move);
+}

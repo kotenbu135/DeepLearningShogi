@@ -50,3 +50,9 @@ bool __fuseki_parse_usi_move(const std::string& moveStr, int* outPieceType, int*
 // テスト用: sfenを実際のPosition::set()で読み込み、通常経路のmake_input_features()で特徴量を作る。
 // FusekiPosition経由の特徴量（__fuseki_make_input_features）とのテンソル等価性を検証するために使う。
 void __make_input_features_from_sfen(const std::string& sfen, char* ndfeatures1, char* ndfeatures2);
+// デバッグ用: hcpe3_get_hcpeが返す生のHuffmanCodedPosAndEval（38バイト）をPosition::set()で復元し、
+// SFEN文字列を返す（復元失敗なら空文字列）。selfplay --fusekiが出力したhcpe3データの局面が
+// 壊れていないかの検証用。
+std::string __debug_hcp_to_sfen(const char* rawHcpe);
+// デバッグ用: 上と同じ局面で、記録されたbestMove16がその局面において合法な指し手かどうかを返す。
+bool __debug_hcpe_move_legal(const char* rawHcpe);
