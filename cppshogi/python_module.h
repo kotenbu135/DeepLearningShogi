@@ -38,6 +38,7 @@ bool __fuseki_is_placement_done();
 int __fuseki_turn();
 int __fuseki_ply();
 int __fuseki_remaining(int color, int pieceType);
+bool __fuseki_is_king_attacked(int color);
 std::string __fuseki_to_sfen();
 // sfenを実際にPosition::set()で読み込み、王1枚ずつ・盤上40枚・持ち駒0・41手目、を満たすか検証する。
 bool __fuseki_verify_final_sfen(const std::string& sfen);

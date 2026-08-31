@@ -92,7 +92,56 @@ std::vector<std::pair<PieceType, Square>> FusekiPosition::legalDrops() const {
         }
     }
 
+    // 最終手（40手目）だけは、打った結果自玉が相手の利きに当たる手を除外する。
+    // 詳細と例外の扱いはfuseki.hppのlegalDrops()のコメント参照。
+    if (ply_ == TotalPlies - 1) {
+        std::vector<std::pair<PieceType, Square>> safe;
+        safe.reserve(moves.size());
+        for (const auto& move : moves) {
+            FusekiPosition next = *this; // POD。ポインタも仮想関数も持たない
+            next.doDrop(move.first, move.second);
+            if (!next.isKingAttacked(us))
+                safe.emplace_back(move);
+        }
+        if (!safe.empty())
+            return safe;
+        // 自玉を取られない置き方が1つも無い場合は制限を外す（手詰まりにしない）。
+    }
+
     return moves;
+}
+
+Square FusekiPosition::kingSquare(const Color c) const {
+    for (Square sq = SQ11; sq < SquareNum; ++sq) {
+        const Piece pc = board_[sq];
+        if (pc != Empty && pieceToColor(pc) == c && pieceToPieceType(pc) == King)
+            return sq;
+    }
+    return SquareNum;
+}
+
+bool FusekiPosition::isKingAttacked(const Color c) const {
+    const Square ksq = kingSquare(c);
+    if (ksq == SquareNum)
+        return false; // まだ玉を打っていない
+
+    // Position を作らずに利きを求める。make_input_features(const FusekiPosition&, ...)
+    // （cppshogi.cpp）が同じやり方で Position::attacksFrom を使っている。
+    Bitboard occupied = allZeroBB();
+    for (Square sq = SQ11; sq < SquareNum; ++sq) {
+        if (board_[sq] != Empty)
+            occupied.setBit(sq);
+    }
+
+    const Color them = oppositeColor(c);
+    for (Square sq = SQ11; sq < SquareNum; ++sq) {
+        const Piece pc = board_[sq];
+        if (pc == Empty || pieceToColor(pc) != them)
+            continue;
+        if (Position::attacksFrom(pieceToPieceType(pc), them, sq, occupied).isSet(ksq))
+            return true;
+    }
+    return false;
 }
 
 void FusekiPosition::doDrop(const PieceType pt, const Square sq) {

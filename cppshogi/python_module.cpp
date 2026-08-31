@@ -2040,6 +2040,12 @@ int __fuseki_ply() {
     return g_fusekiPos.ply();
 }
 
+// 色colorの玉が相手の利きに当たっているか。対局ドライバが41手目の裁定
+// （「手番側が玉を取れるなら手番側の勝ち」）に使う。
+bool __fuseki_is_king_attacked(int color) {
+    return g_fusekiPos.isKingAttacked(static_cast<Color>(color));
+}
+
 int __fuseki_remaining(int color, int pieceType) {
     return g_fusekiPos.remaining(static_cast<Color>(color), static_cast<PieceType>(pieceType));
 }
@@ -2063,6 +2069,13 @@ bool __fuseki_verify_final_sfen(const std::string& sfen) {
         if ((pos.bbOf(Pawn, Black) & fileMask(f)).popCount() != 1) return false;
         if ((pos.bbOf(Pawn, White) & fileMask(f)).popCount() != 1) return false;
     }
+
+    // 41手目の手番側（先手）が相手玉を取れる局面は、通常将棋の意味で非合法
+    // （相手が自玉を取られる形で手を止めている）。FusekiPosition::legalDrops()が
+    // 40手目にこの形を除外するのでここには来ないはずだが、外部から与えられたSFENや
+    // 除外しきれない例外ケース（fuseki.hppのlegalDrops()のコメント参照）を検出するために見る。
+    if (pos.attackersToIsAny(pos.turn(), pos.kingSquare(oppositeColor(pos.turn()))))
+        return false;
 
     return true;
 }

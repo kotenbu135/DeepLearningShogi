@@ -42,6 +42,7 @@ cdef extern from "python_module.h" nogil:
     int __fuseki_turn()
     int __fuseki_ply()
     int __fuseki_remaining(int color, int pieceType)
+    bool __fuseki_is_king_attacked(int color)
     string __fuseki_to_sfen()
     bool __fuseki_verify_final_sfen(const string& sfen)
     void __fuseki_make_input_features(char* ndfeatures1, char* ndfeatures2)
@@ -162,6 +163,9 @@ def fuseki_ply():
 
 def fuseki_remaining(int color, int piece_type):
     return __fuseki_remaining(color, piece_type)
+
+def fuseki_is_king_attacked(int color):
+    return __fuseki_is_king_attacked(color)
 
 def fuseki_to_sfen():
     return __fuseki_to_sfen().decode('ascii')
