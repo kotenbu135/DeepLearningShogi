@@ -256,3 +256,8 @@ ModelManifest.xml
 /dist
 lightning_logs/
 .vscode/
+
+# 学習チェックポイント・ビルド成果物を誤って公開フォークへコミットしないための保険。
+# checkpoint-*.pth はGCT派生の重みを含みうる（THIRD_PARTY.md参照）。
+*.pth
+*.so

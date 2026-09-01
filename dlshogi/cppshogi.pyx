@@ -149,6 +149,17 @@ def fuseki_legal_drops():
     cdef int n = __fuseki_legal_drops(<int*>ndPieceTypes.data, <int*>ndSquares.data, FUSEKI_MAX_MOVES)
     return [(int(ndPieceTypes[i]), int(ndSquares[i])) for i in range(n)]
 
+# 合法手を (n, 2) 形状のint32配列（列0=piece_type, 列1=square）で返す。
+# fuseki_legal_drops()はPythonのタプルのリストを組み立てるため、合法手80手前後で
+# 1回あたり約7マイクロ秒かかり、ロールアウトのCPU時間の約2割を占めていた。
+# (2, MAX)で確保して転置ビューを返すので、コピーは発生しない。
+def fuseki_legal_drops_array():
+    cdef int maxn = FUSEKI_MAX_MOVES
+    cdef np.ndarray buf = np.empty((2, maxn), dtype=np.int32)
+    cdef int* p = <int*>buf.data
+    cdef int n = __fuseki_legal_drops(p, p + maxn, maxn)
+    return buf[:, :n].T
+
 def fuseki_do_drop(int piece_type, int square):
     __fuseki_do_drop(piece_type, square)
 
