@@ -83,7 +83,9 @@ int make_fuseki_move_label(const PieceType pt, const Square to, const Color colo
 // **288ではない**: 初手局面で実際に合法なのは自陣36マス × 8駒種 = 288 だが、出力テンソルは
 // 81マスぶん持つ。ヘッドが1x1畳み込みなので288に絞ってもパラメータは減らず、
 // ONNX/WASMの経路にgatherが1つ増えるだけだからである（docs/degct_plan.md B-3）。
-constexpr int FUSEKI_PIECE_SLOTS = HandPieceNum + 1;               // 8
+constexpr int FUSEKI_PIECE_SLOTS = (int)HandPieceNum + 1;          // 8。intに落とすのは
+// OverloadEnumOperatorsのoperator+がHandPieceを返し、8がHandPieceの値域[0,7]の外で
+// 定数式にならないため（MAX_MOVE_LABEL_NUMはMoveDirectionとの加算でintに昇格している）。
 constexpr int FUSEKI_LABEL_NUM = (int)SquareNum * FUSEKI_PIECE_SLOTS;  // 648
 // make_fuseki_move_label() から 81 * (MAX_MOVE_LABEL_NUM - FUSEKI_PIECE_SLOTS) = 1620 を引いた値。
 // 引き算の定義をここ1箇所に閉じる（WASMのfw_compact_label、Pythonのfuseki_net.py、
