@@ -76,6 +76,20 @@ void make_input_features(const FusekiPosition& fusekiPos, packed_features1_t pac
 // Kingはhand_piece = HandPieceNum（末尾）として扱う。
 int make_fuseki_move_label(const PieceType pt, const Square to, const Color color);
 
+// 布石専用ネット（scripts/fuseki_net.py の fuseki6x64 等）の出力空間。
+// 布石は駒打ちしか無いので、MAX_MOVE_LABEL_NUM(28) のうち盤上の指し手に割り当てられた
+// 先頭 MOVE_DIRECTION_NUM(20) スロットは一切立たない。そこを落として 8 スロット
+// （持駒7種 + King）だけを残したのが下の 648 次元である。
+// **288ではない**: 初手局面で実際に合法なのは自陣36マス × 8駒種 = 288 だが、出力テンソルは
+// 81マスぶん持つ。ヘッドが1x1畳み込みなので288に絞ってもパラメータは減らず、
+// ONNX/WASMの経路にgatherが1つ増えるだけだからである（docs/degct_plan.md B-3）。
+constexpr int FUSEKI_PIECE_SLOTS = HandPieceNum + 1;               // 8
+constexpr int FUSEKI_LABEL_NUM = (int)SquareNum * FUSEKI_PIECE_SLOTS;  // 648
+// make_fuseki_move_label() から 81 * (MAX_MOVE_LABEL_NUM - FUSEKI_PIECE_SLOTS) = 1620 を引いた値。
+// 引き算の定義をここ1箇所に閉じる（WASMのfw_compact_label、Pythonのfuseki_net.py、
+// test/gen_parity_ref.py がそれぞれ独立に同じ値を出し、parity_test.mjsが突き合わせる）。
+int make_fuseki_compact_label(const PieceType pt, const Square to, const Color color);
+
 // 評価値から価値(勝率)に変換
 // スケールパラメータは、elmo_for_learnの勝率から調査した値
 inline float score_to_value(const Score score) {

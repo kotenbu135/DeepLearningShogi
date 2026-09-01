@@ -337,3 +337,10 @@ int make_fuseki_move_label(const PieceType pt, Square to, const Color color) {
 	const int move_direction_label = MOVE_DIRECTION_NUM + hand_piece;
 	return 9 * 9 * move_direction_label + to;
 }
+
+// 布石専用ネットの648次元ラベル。定義を二重に持たないため、既存のラベルから
+// 盤上の指し手ぶん(81 * MOVE_DIRECTION_NUM = 1620)を引いて導く。
+int make_fuseki_compact_label(const PieceType pt, const Square to, const Color color) {
+	return make_fuseki_move_label(pt, to, color)
+		- 9 * 9 * (MAX_MOVE_LABEL_NUM - FUSEKI_PIECE_SLOTS);
+}

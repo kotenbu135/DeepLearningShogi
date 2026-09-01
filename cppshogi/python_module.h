@@ -46,6 +46,7 @@ bool __fuseki_verify_final_sfen(const std::string& sfen);
 void __fuseki_make_input_features(char* ndfeatures1, char* ndfeatures2);
 // 布石フェーズの駒打ちを方策ラベルに変換する。
 int __fuseki_move_label(int pieceType, int square, int color);
+int __fuseki_compact_label(int pieceType, int square, int color);
 // usi/main.cppのbestmoveが返す"K*5i"形式の指し手文字列を(pieceType, square)に変換する。不正な形式ならfalse。
 bool __fuseki_parse_usi_move(const std::string& moveStr, int* outPieceType, int* outSquare);
 // テスト用: sfenを実際のPosition::set()で読み込み、通常経路のmake_input_features()で特徴量を作る。

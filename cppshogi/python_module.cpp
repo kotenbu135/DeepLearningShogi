@@ -2092,6 +2092,10 @@ int __fuseki_move_label(int pieceType, int square, int color) {
     return make_fuseki_move_label(static_cast<PieceType>(pieceType), static_cast<Square>(square), static_cast<Color>(color));
 }
 
+int __fuseki_compact_label(int pieceType, int square, int color) {
+    return make_fuseki_compact_label(static_cast<PieceType>(pieceType), static_cast<Square>(square), static_cast<Color>(color));
+}
+
 // USI経由（usi/main.cppのbestmove）で返る"K*5i"形式の指し手文字列を(pieceType, square)に変換する。
 // これはusi/main.cppが指し手の再生に使う既存のparseFusekiMoveUSI（fuseki.cpp）をそのまま呼ぶだけで、
 // 変換テーブルをPython側に重複実装しないため。
