@@ -15,13 +15,22 @@
 #include <utility>
 #include <vector>
 
+// 布石のルールに足す禁じ手（ビットで重ねる）。0 は shogitter の布石将棋そのまま。
+enum FusekiRule : int {
+    FusekiRuleNone = 0,
+    // 二飛香（天秤将棋、2026-09-13 に追加）: 自陣の同じ筋に、自分の飛と香を合わせて1枚までしか打てない。
+    // 数えるのは自分の駒だけ。合法手の候補を出す段階で除くので、40手目の制限が外れても外れない。
+    FusekiRuleNihikyo = 1 << 0,
+};
+
 class FusekiPosition {
 public:
     static const int TotalPlies = 40; // 双方20手ずつ
 
     FusekiPosition() { reset(); }
 
-    void reset();
+    // rules は FusekiRule の組み合わせ。既定は布石将棋（学習系の呼び出し元は変えずに済む）。
+    void reset(int rules = FusekiRuleNone);
 
     // 手番側が指せる合法な「駒種を打つ」手を列挙する。
     //
@@ -50,6 +59,7 @@ public:
     bool isPlacementDone() const { return ply_ >= TotalPlies; }
     Color turn() const { return turn_; }
     int ply() const { return ply_; }
+    int rules() const { return rules_; }
     int remaining(Color c, PieceType pt) const { return remaining_[c][pt]; }
     Piece pieceOn(Square sq) const { return board_[sq]; }
 
@@ -65,6 +75,7 @@ private:
     int remaining_[ColorNum][King + 1]; // Pawn, Lance, Knight, Silver, Gold, Bishop, Rook, King の残数
     Color turn_;
     int ply_;
+    int rules_; // FusekiRule の組み合わせ
 };
 
 // 布石フェーズの手を USI 風の駒打ち表記（例: "K*5i"）に変換する。

@@ -18,7 +18,8 @@ namespace {
     };
 }
 
-void FusekiPosition::reset() {
+void FusekiPosition::reset(const int rules) {
+    rules_ = rules;
     for (Square sq = SQ11; sq < SquareNum; ++sq)
         board_[sq] = Empty;
 
@@ -78,6 +79,19 @@ std::vector<std::pair<PieceType, Square>> FusekiPosition::legalDrops() const {
                     }
                 }
                 if (hasOwnPawnInFile)
+                    continue;
+            } else if ((rules_ & FusekiRuleNihikyo) && (pt == Rook || pt == Lance)) {
+                // 二飛香: 自陣内の同じ筋に既に自分の飛か香があれば、この筋には飛も香も打てない。
+                bool hasOwnRookOrLanceInFile = false;
+                for (Rank r = begin; r <= end; ++r) {
+                    const Piece pc = board_[makeSquare(file, r)];
+                    if (pc != Empty && pieceToColor(pc) == us
+                        && (pieceToPieceType(pc) == Rook || pieceToPieceType(pc) == Lance)) {
+                        hasOwnRookOrLanceInFile = true;
+                        break;
+                    }
+                }
+                if (hasOwnRookOrLanceInFile)
                     continue;
             }
 

@@ -30,7 +30,8 @@ void __hcpe3_merge(const std::vector<std::string>& files, const std::string& out
 unsigned int __get_max_features2_nyugyoku_num();
 
 // 布石将棋の布石フェーズ（グローバルに1局面だけ保持する）
-void __fuseki_reset();
+// rules は FusekiRule（fuseki.hpp）の組み合わせ。既定の0は布石将棋。
+void __fuseki_reset(int rules = 0);
 // legalDropsをoutPieceTypes/outSquaresに書き出し、手数を返す。書き出し先の容量はmaxCount。
 int __fuseki_legal_drops(int* outPieceTypes, int* outSquares, int maxCount);
 void __fuseki_do_drop(int pieceType, int square);

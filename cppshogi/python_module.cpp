@@ -2010,8 +2010,8 @@ namespace {
     FusekiPosition g_fusekiPos;
 }
 
-void __fuseki_reset() {
-    g_fusekiPos.reset();
+void __fuseki_reset(int rules) {
+    g_fusekiPos.reset(rules);
 }
 
 int __fuseki_legal_drops(int* outPieceTypes, int* outSquares, int maxCount) {
