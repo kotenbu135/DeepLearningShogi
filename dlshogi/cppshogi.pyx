@@ -35,7 +35,7 @@ cdef extern from "python_module.h" nogil:
     void __hcpe3_merge(const vector[string]& files, const string& out, const bool outMaxmove, const bool outMate, const bool outBrinkmate) except +
     unsigned int __get_max_features2_nyugyoku_num()
 
-    void __fuseki_reset()
+    void __fuseki_reset(int rules)
     int __fuseki_legal_drops(int* outPieceTypes, int* outSquares, int maxCount)
     void __fuseki_do_drop(int pieceType, int square)
     bool __fuseki_is_placement_done()
@@ -140,8 +140,9 @@ def get_max_features2_nyugyoku_num():
 # 布石将棋の布石フェーズ（グローバルに1局面だけ保持する軽量な状態）
 FUSEKI_MAX_MOVES = 400
 
-def fuseki_reset():
-    __fuseki_reset()
+# rules は FusekiRule（cppshogi/fuseki.hpp）の組み合わせ。既定の0は布石将棋、1は二飛香（天秤将棋）。
+def fuseki_reset(int rules=0):
+    __fuseki_reset(rules)
 
 def fuseki_legal_drops():
     cdef np.ndarray ndPieceTypes = np.empty(FUSEKI_MAX_MOVES, dtype=np.int32)
